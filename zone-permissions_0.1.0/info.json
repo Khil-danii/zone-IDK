@@ -1,0 +1,9 @@
+{
+  "name": "zone-permissions",
+  "version": "0.1.0",
+  "title": "Zone Permissions",
+  "author": "YourName",
+  "factorio_version": "2.0",
+  "description": "Adds zone-based permission system that overrides global group permissions in specific areas",
+  "dependencies": ["base >= 1.1.0"]
+}
