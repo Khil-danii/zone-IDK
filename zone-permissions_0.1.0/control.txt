@@ -1,0 +1,377 @@
+local zones = {}
+
+script.on_init(function()
+    global.zones = global.zones or {}
+    global.zone_counter = global.zone_counter or 0
+end)
+
+script.on_load(function()
+    zones = global.zones or {}
+end)
+
+commands.add_command("zone-tool", "Give zone selection tool", function(command)
+    local player = game.get_player(command.player_index)
+    if not player then return end
+    
+    if not player.admin then
+        player.print("Only admins can use zone tools!", {color = {r = 1, g = 0, b = 0}})
+        return
+    end
+    
+    player.cursor_stack.set_stack({name = "zone-selector-item", count = 1})
+    
+    player.print("Zone selection tool given. Click and drag to create a new zone.", {color = {r = 0, g = 1, b = 0}})
+end)
+
+local function is_position_in_zone(position, zone)
+    return position.x >= zone.left_top.x and 
+           position.x <= zone.right_bottom.x and
+           position.y >= zone.left_top.y and 
+           position.y <= zone.right_bottom.y
+end
+
+local function get_zone_at_position(position, surface_index)
+    for zone_id, zone in pairs(global.zones) do
+        if zone.surface_index == surface_index and is_position_in_zone(position, zone) then
+            return zone
+        end
+    end
+    return nil
+end
+
+local function check_zone_permission(player, position, action_type)
+    local surface_index = player.surface.index
+    local zone = get_zone_at_position(position, surface_index)
+    
+    if not zone then
+        return true
+    end
+    
+    local player_group = player.permission_group
+    if not player_group then
+        player_group = game.permissions.get_group("Default")
+    end
+    
+    if zone.permissions and zone.permissions[player_group.name] then
+        local zone_permissions = zone.permissions[player_group.name]
+        
+        if zone_permissions[action_type] ~= nil then
+            return zone_permissions[action_type]
+        end
+    end
+    
+    return player_group.allows_action(defines.input_action[action_type])
+end
+
+local function render_zone_boundary(zone, surface)
+    local left_top = zone.left_top
+    local right_bottom = zone.right_bottom
+    
+    local rectangle_id = rendering.draw_rectangle{
+        color = {r = 0, g = 1, b = 0, a = 0.5},
+        filled = false,
+        width = 3,
+        left_top = left_top,
+        right_bottom = right_bottom,
+        surface = surface,
+        draw_on_ground = true,
+        time_to_live = 0
+    }
+    
+    local text_id = rendering.draw_text{
+        text = zone.name,
+        surface = surface,
+        target = {x = (left_top.x + right_bottom.x) / 2, y = left_top.y - 1},
+        color = {r = 0, g = 1, b = 0},
+        scale = 1.5,
+        alignment = "center",
+        time_to_live = 0
+    }
+    
+    zone.render_objects = zone.render_objects or {}
+    table.insert(zone.render_objects, rectangle_id)
+    table.insert(zone.render_objects, text_id)
+end
+
+local function remove_zone_rendering(zone)
+    if zone.render_objects then
+        for _, render_id in pairs(zone.render_objects) do
+            if rendering.is_valid(render_id) then
+                rendering.destroy(render_id)
+            end
+        end
+        zone.render_objects = {}
+    end
+end
+
+script.on_event(defines.events.on_player_selected_area, function(event)
+    local player = game.get_player(event.player_index)
+    if not player or not player.admin then return end
+    
+    if event.item and event.item == "zone-selector" then
+        global.zone_counter = global.zone_counter + 1
+        local zone_id = "zone_" .. global.zone_counter
+        
+        global.zones[zone_id] = {
+            id = zone_id,
+            name = "Zone " .. global.zone_counter,
+            left_top = event.area.left_top,
+            right_bottom = event.area.right_bottom,
+            surface_index = player.surface.index,
+            permissions = {},
+            created_by = player.name,
+            created_tick = game.tick,
+            render_objects = {}
+        }
+        
+        player.print("Zone created: " .. zone_id .. " at " .. 
+                    "(" .. math.floor(event.area.left_top.x) .. "," .. math.floor(event.area.left_top.y) .. ") to " ..
+                    "(" .. math.floor(event.area.right_bottom.x) .. "," .. math.floor(event.area.right_bottom.y) .. ")")
+        
+        render_zone_boundary(global.zones[zone_id], player.surface)
+    end
+end)
+
+script.on_event(defines.events.on_built_entity, function(event)
+    local player = game.get_player(event.player_index)
+    if not player then return end
+    
+    local entity = event.created_entity
+    if not entity or not entity.valid then return end
+    
+    if not check_zone_permission(player, entity.position, "build") then
+        player.print("Building is not allowed in this zone!", {color = {r = 1, g = 0, b = 0}})
+        
+        player.insert(event.stack)
+        entity.destroy()
+        return
+    end
+end)
+
+script.on_event(defines.events.on_pre_player_mined_item, function(event)
+    local player = game.get_player(event.player_index)
+    if not player then return end
+    
+    local entity = event.entity
+    if not entity or not entity.valid then return end
+    
+    if not check_zone_permission(player, entity.position, "mine") then
+        player.print("Mining/destroying is not allowed in this zone!", {color = {r = 1, g = 0, b = 0}})
+        
+        event.cancel = true
+        return
+    end
+end)
+
+script.on_event(defines.events.on_robot_built_entity, function(event)
+    local entity = event.created_entity
+    if not entity or not entity.valid then return end
+    
+    local robot = event.robot
+    if not robot or not robot.valid then return end
+    
+    local network = robot.logistic_network
+    local owner_player = nil
+    
+    if network then
+        for _, player in pairs(game.players) do
+            if player.force == robot.force then
+                owner_player = player
+                break
+            end
+        end
+    end
+    
+    if not owner_player then return end
+    
+    if not check_zone_permission(owner_player, entity.position, "build") then
+        if event.stack then
+            owner_player.insert(event.stack)
+        end
+        entity.destroy()
+        owner_player.print("Robot building blocked in restricted zone!", {color = {r = 1, g = 0, b = 0}})
+        return
+    end
+end)
+
+script.on_event(defines.events.on_robot_pre_mined, function(event)
+    local entity = event.entity
+    if not entity or not entity.valid then return end
+    
+    local robot = event.robot
+    if not robot or not robot.valid then return end
+    
+    local network = robot.logistic_network
+    local owner_player = nil
+    
+    if network then
+        for _, player in pairs(game.players) do
+            if player.force == robot.force then
+                owner_player = player
+                break
+            end
+        end
+    end
+    
+    if not owner_player then return end
+    
+    if not check_zone_permission(owner_player, entity.position, "mine") then
+        owner_player.print("Robot mining blocked in restricted zone!", {color = {r = 1, g = 0, b = 0}})
+        event.cancel = true
+        return
+    end
+end)
+
+script.on_event(defines.events.on_player_setup_blueprint, function(event)
+    local player = game.get_player(event.player_index)
+    if not player then return end
+    
+    local area = event.area
+    local center_position = {
+        x = (area.left_top.x + area.right_bottom.x) / 2,
+        y = (area.left_top.y + area.right_bottom.y) / 2
+    }
+    
+    if not check_zone_permission(player, center_position, "build") then
+        player.print("Blueprint usage not allowed in this zone!", {color = {r = 1, g = 0, b = 0}})
+        if player.cursor_stack and player.cursor_stack.valid_for_read then
+            player.cursor_stack.clear()
+        end
+        return
+    end
+end)
+
+script.on_event(defines.events.on_player_used_capsule, function(event)
+    local player = game.get_player(event.player_index)
+    if not player then return end
+    
+    if not check_zone_permission(player, event.position, "use_item") then
+        player.print("Item usage not allowed in this zone!", {color = {r = 1, g = 0, b = 0}})
+        return
+    end
+end)
+
+commands.add_command("list-zones", "List all zones", function(command)
+    local player = game.get_player(command.player_index)
+    if not player or not player.admin then 
+        player.print("Only admins can list zones!")
+        return 
+    end
+    
+    player.print("=== Zone List ===")
+    for zone_id, zone in pairs(global.zones) do
+        player.print(zone_id .. ": " .. zone.name .. 
+                    " [" .. zone.left_top.x .. "," .. zone.left_top.y .. "] to " ..
+                    "[" .. zone.right_bottom.x .. "," .. zone.right_bottom.y .. "]")
+    end
+end)
+
+commands.add_command("delete-zone", "Delete zone by ID", function(command)
+    local player = game.get_player(command.player_index)
+    if not player or not player.admin then return end
+    
+    local zone_id = command.parameter
+    if not zone_id or not global.zones[zone_id] then
+        player.print("Zone not found: " .. (zone_id or "nil"))
+        return
+    end
+    
+    remove_zone_rendering(global.zones[zone_id])
+    
+    global.zones[zone_id] = nil
+    player.print("Zone deleted: " .. zone_id)
+end)
+
+local function create_zone_management_gui(player)
+    if player.gui.screen.zone_management then
+        player.gui.screen.zone_management.destroy()
+    end
+    
+    local frame = player.gui.screen.add{
+        type = "frame",
+        name = "zone_management",
+        caption = "Zone Management",
+        direction = "vertical"
+    }
+    frame.auto_center = true
+    
+    local scroll_pane = frame.add{
+        type = "scroll-pane",
+        name = "zones_scroll"
+    }
+    scroll_pane.style.maximal_height = 400
+    scroll_pane.style.minimal_width = 500
+    
+    for zone_id, zone in pairs(global.zones) do
+        local zone_frame = scroll_pane.add{
+            type = "frame",
+            name = "zone_" .. zone_id,
+            caption = zone.name .. " (" .. zone_id .. ")",
+            direction = "vertical"
+        }
+        
+        zone_frame.add{
+            type = "label",
+            caption = "Position: (" .. math.floor(zone.left_top.x) .. "," .. math.floor(zone.left_top.y) .. 
+                     ") to (" .. math.floor(zone.right_bottom.x) .. "," .. math.floor(zone.right_bottom.y) .. ")"
+        }
+        
+        zone_frame.add{
+            type = "label",
+            caption = "Created by: " .. (zone.created_by or "Unknown")
+        }
+        
+        local buttons = zone_frame.add{
+            type = "flow",
+            direction = "horizontal"
+        }
+        
+        buttons.add{
+            type = "button",
+            name = "delete_zone_" .. zone_id,
+            caption = "Delete"
+        }
+    end
+    
+    frame.add{
+        type = "button",
+        name = "close_zone_gui",
+        caption = "Close"
+    }
+end
+
+commands.add_command("zone-gui", "Open zone management interface", function(command)
+    local player = game.get_player(command.player_index)
+    if not player or not player.admin then 
+        player.print("Only administrators can access zone management!")
+        return 
+    end
+    
+    create_zone_management_gui(player)
+end)
+
+script.on_event(defines.events.on_gui_click, function(event)
+    local player = game.get_player(event.player_index)
+    if not player then return end
+    
+    local element = event.element
+    
+    if element.name == "close_zone_gui" then
+        if player.gui.screen.zone_management then
+            player.gui.screen.zone_management.destroy()
+        end
+        return
+    end
+    
+    if string.match(element.name, "^delete_zone_(.+)$") then
+        local zone_id = string.match(element.name, "^delete_zone_(.+)$")
+        if global.zones[zone_id] then
+            remove_zone_rendering(global.zones[zone_id])
+            global.zones[zone_id] = nil
+            player.print("Zone deleted: " .. zone_id)
+            
+            create_zone_management_gui(player)
+        end
+        return
+    end
+end)
