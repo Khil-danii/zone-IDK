@@ -127,12 +127,15 @@ end)
 commands.add_command("show-zone","Показать зоны",function(ev)
   local p=game.get_player(ev.player_index)
   if not p then return end
+  if not p.admin then p.print("Эта команда доступна только администраторам.",{r=1,g=0,b=0}) return end
   for id in pairs(storage.zones or {}) do render(id) end
   p.print("Все зоны показаны",{r=0,g=1,b=0})
 end)
 
 commands.add_command("zone-tool","Получить инструмент",function(ev)
   local p=game.get_player(ev.player_index)
+  if not p then return end
+  if not p.admin then p.print("Эта команда доступна только администраторам.",{r=1,g=0,b=0}) return end
   if p then p.clear_cursor(); p.cursor_stack.set_stack{name="zone-selector",count=1}; p.print("Инструмент",{r=0,g=1,b=0}) end
 end)
 
@@ -162,7 +165,9 @@ end
 
 commands.add_command("zone-gui","Открыть GUI",function(ev)
   local p=game.get_player(ev.player_index)
-  if p then gui(p) end
+  if not p then return end
+  if not p.admin then p.print("Эта команда доступна только администраторам.",{r=1,g=0,b=0}) return end
+  gui(p)
 end)
 
 script.on_event(defines.events.on_gui_click, function(ev)
