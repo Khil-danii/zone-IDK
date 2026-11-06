@@ -1,0 +1,8 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.1.5
+Date: 2026-11-06
+  Bugfixes:
+    - Use minable_flag when changing mining permissions in Factorio 2.1.
+    - Restore original entity properties when a zone is disabled or deleted.
+    - Keep overlapping zones protected until their last protection is removed.
+    - Preserve protection snapshots across save/load and discard destroyed entities.

@@ -1,12 +1,11 @@
-script.on_init(function()
+local function initialize_storage()
   storage.zones = storage.zones or {}
   storage.zone_counter = storage.zone_counter or 0
-end)
+  storage.protected_entities = storage.protected_entities or {}
+end
 
-script.on_configuration_changed(function()
-  storage.zones = storage.zones or {}
-  storage.zone_counter = storage.zone_counter or 0
-end)
+script.on_init(initialize_storage)
+script.on_configuration_changed(initialize_storage)
 
 script.on_load(function() end)
 
@@ -22,19 +21,79 @@ local function is_prot(pos,surf)
   return false,nil
 end
 
-local function protect(z)
-  local s=game.surfaces[z.surface]; if not s then return end
-  for _,e in pairs(s.find_entities_filtered{area=z.area}) do
-    if e.valid then e.minable=false; e.destructible=false; if e.rotatable~=nil then e.rotatable=false end end
+local function protect_entity(id, z, entity)
+  if not entity.valid then return end
+  -- Registration numbers also identify entities without a unit_number, such as resources.
+  local registration = script.register_on_object_destroyed(entity)
+  local state = storage.protected_entities[registration]
+  if not state then
+    state = {
+      entity = entity,
+      minable_flag = entity.minable_flag,
+      destructible = entity.destructible,
+      rotatable = entity.rotatable,
+      zones = {}
+    }
+    storage.protected_entities[registration] = state
+  end
+  state.zones[id] = true
+  z.protected_entities = z.protected_entities or {}
+  z.protected_entities[registration] = true
+  entity.minable_flag = false
+  entity.destructible = false
+  entity.rotatable = false
+end
+
+local function protect(id)
+  local z = storage.zones[id]
+  local surface = game.surfaces[z.surface]
+  if not surface then return end
+  for _,entity in pairs(surface.find_entities_filtered{area=z.area}) do
+    protect_entity(id, z, entity)
   end
 end
 
-local function unprotect(z)
-  local s=game.surfaces[z.surface]; if not s then return end
-  for _,e in pairs(s.find_entities_filtered{area=z.area}) do
-    if e.valid then e.minable=true; e.destructible=true; if e.rotatable~=nil then e.rotatable=true end end
+local function protect_at_position(entity)
+  for id,z in pairs(storage.zones) do
+    if z.protected and z.surface == entity.surface.name
+        and in_zone(entity.position.x, entity.position.y, z) then
+      protect_entity(id, z, entity)
+    end
   end
 end
+
+local function unprotect(id)
+  local z = storage.zones[id]
+  -- Older saves have no snapshots. Do not guess their objects' original properties.
+  for registration in pairs(z.protected_entities or {}) do
+    local state = storage.protected_entities[registration]
+    if state then
+      state.zones[id] = nil
+      if not next(state.zones) then
+        local entity = state.entity
+        if entity.valid then
+          entity.minable_flag = state.minable_flag
+          entity.destructible = state.destructible
+          entity.rotatable = state.rotatable
+        end
+        storage.protected_entities[registration] = nil
+      end
+    end
+  end
+  z.protected_entities = nil
+end
+
+script.on_event(defines.events.on_object_destroyed, function(ev)
+  local state = storage.protected_entities[ev.registration_number]
+  if not state then return end
+  for id in pairs(state.zones) do
+    local z = storage.zones[id]
+    if z and z.protected_entities then
+      z.protected_entities[ev.registration_number] = nil
+    end
+  end
+  storage.protected_entities[ev.registration_number] = nil
+end)
 
 local function render(id)
   local z=storage.zones[id]; if not z then return false end
@@ -59,7 +118,7 @@ script.on_event(defines.events.on_player_selected_area, function(ev)
   storage.zone_counter=storage.zone_counter+1
   local id="zone_"..storage.zone_counter
   storage.zones[id]={area=ev.area, surface=p.surface.name, created_by=p.name, protected=true}
-  protect(storage.zones[id]); render(id)
+  protect(id); render(id)
   p.print("Зона создана и защищена: "..id,{r=0,g=1,b=0})
 end)
 
@@ -105,7 +164,7 @@ script.on_event({
     if prot then
       local pl = ev.player_index and game.get_player(ev.player_index)
       if pl then pl.print("Действие запрещено в зоне: "..id,{r=1,g=0,b=0}) end
-      e.minable=false; e.destructible=false; if e.rotatable~=nil then e.rotatable=false end
+      protect_at_position(e)
       if ev.name==defines.events.on_player_mined_entity and ev.buffer then ev.buffer.clear()
       elseif ev.name==defines.events.on_player_rotated_entity and e.valid then e.rotate{reverse=true}
       elseif ev.name==defines.events.on_gui_opened and ev.player_index then local pp=game.get_player(ev.player_index); if pp then pp.opened=nil end
@@ -183,10 +242,20 @@ script.on_event(defines.events.on_gui_click, function(ev)
     local id=nm:match("protect_(.+)"); local z=storage.zones[id]
     if z then
       z.protected = not z.protected
-      if z.protected then protect(z) else unprotect(z) end
+      if z.protected then protect(id) else unprotect(id) end
       gui(p)
     end
     return
   end
-  if nm:find("delete_") then local id=nm:match("delete_(.+)"); storage.zones[id]=nil; gui(p); return end
+  if nm:find("delete_") then
+    local id = nm:match("delete_(.+)")
+    local z = storage.zones[id]
+    if z then
+      z.protected = false
+      unprotect(id)
+      storage.zones[id] = nil
+      gui(p)
+    end
+    return
+  end
 end)
