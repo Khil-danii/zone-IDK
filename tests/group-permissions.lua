@@ -29,7 +29,14 @@ local function create_zone(player, x1, x2)
   player.clear_cursor(); player.cursor_stack.set_stack{name="zone-selector",count=1}
   script.get_event_handler(defines.events.on_player_selected_area){player_index=player.index,
     area={left_top={x=x1,y=-5},right_bottom={x=x2,y=5}}}
-  return "zone_"..storage.zone_counter
+  local id = "zone_"..storage.zone_counter
+  action(player,"permissions",id)
+  local editor = assert(player.gui.screen.zone_permissions_gui)
+  assert(editor.zone_admin_bypass.state,"New zone did not default to admin bypass")
+  -- The rest of this suite exercises explicit restrictions for the admin too.
+  editor.zone_admin_bypass.state = false
+  click(player,find(editor,function(e) return e.name == "zone_permissions_save" end))
+  return id
 end
 
 local function edit(player, id, rules, options)
@@ -291,6 +298,7 @@ script.on_event(defines.events.on_tick,function()
     local entity = assert(storage.legacy_test_entity)
     assert(storage.permission_overlays and storage.zones.zone_1.default_permissions,"Same-version legacy migration did not run")
     assert(not storage.zones.zone_1.default_permissions.build,"Legacy migration opened zone")
+    assert(not storage.zones.zone_1.admin_bypass,"Legacy migration changed existing admin bypass")
     assert(not entity.minable_flag and not entity.destructible,"Legacy protection was lost")
     action(player,"delete","zone_1")
     assert(entity.minable_flag and entity.destructible and entity.rotatable,"Legacy snapshot was not restored")

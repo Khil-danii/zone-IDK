@@ -71,7 +71,12 @@ local function zone(player, x1, x2)
   player.cursor_stack.set_stack{name="zone-selector",count=1}
   script.get_event_handler(defines.events.on_player_selected_area){
     player_index=player.index,area={left_top={x=x1,y=-6},right_bottom={x=x2,y=6}}}
-  return "zone_"..storage.zone_counter
+  local id = "zone_"..storage.zone_counter
+  -- Refund scenarios deliberately forbid the test administrator too.
+  storage.zones[id].admin_bypass = false
+  protect(id)
+  permissions.refresh_all()
+  return id
 end
 
 local function fill_inventory(inventory)

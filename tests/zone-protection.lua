@@ -36,7 +36,12 @@ local function zone(player, x1, x2, y1, y2)
     name=defines.events.on_player_selected_area, player_index=player.index,
     item="zone-selector", area={left_top={x=x1,y=y1 or 3}, right_bottom={x=x2,y=y2 or 7}}
   }
-  return "zone_" .. storage.zone_counter
+  local id = "zone_" .. storage.zone_counter
+  -- This suite exercises zones with a full entity-wide lock.
+  storage.zones[id].admin_bypass = false
+  protect(id)
+  permissions.refresh_all()
+  return id
 end
 
 local function entity(surface, name, x, y, extra)

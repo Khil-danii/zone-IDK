@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.1.6
+Date: 2026-11-06
+  Changes:
+    - Show zone boundaries and labels for 11 game seconds from the zone GUI.
+    - Enable administrator bypass by default for newly created zones.
+    - Preserve administrator bypass settings of existing zones.
+---------------------------------------------------------------------------------------------------
 Version: 0.1.5
 Date: 2026-11-06
   Bugfixes:

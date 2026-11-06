@@ -127,19 +127,20 @@ script.on_event(defines.events.on_object_destroyed, function(ev)
   storage.protected_entities[ev.registration_number] = nil
 end)
 
-local function render(id)
+local function render(id, duration)
   local z=storage.zones[id]; if not z then return false end
   local s=game.surfaces[z.surface]; if not s then return false end
+  duration = duration or 180
   rendering.draw_rectangle{
     color=z.protected and {r=1,g=0,b=0,a=0.4} or {r=0,g=1,b=0,a=0.4},
     width=3, left_top=z.area.left_top, right_bottom=z.area.right_bottom,
-    surface=s, time_to_live=180
+    surface=s, time_to_live=duration
   }
   rendering.draw_text{
     text=id..(z.protected and" [ЗАЩИЩЕНА]" or" [ОТКРЫТА]"),
     surface=s,
     target={x=(z.area.left_top.x+z.area.right_bottom.x)/2, y=z.area.left_top.y-1.5},
-    color={r=1,g=1,b=1}, scale=1.2, time_to_live=180
+    color={r=1,g=1,b=1}, scale=1.2, time_to_live=duration
   }
   return true
 end
@@ -149,7 +150,7 @@ script.on_event(defines.events.on_player_selected_area, function(ev)
   if not p or not p.admin or not p.cursor_stack.valid_for_read or p.cursor_stack.name~="zone-selector" then return end
   storage.zone_counter=storage.zone_counter+1
   local id="zone_"..storage.zone_counter
-  storage.zones[id]={area=ev.area, surface=p.surface.name, created_by=p.name, protected=true}
+  storage.zones[id]={area=ev.area, surface=p.surface.name, created_by=p.name, protected=true, admin_bypass=true}
   permissions.initialize()
   protect(id); render(id)
   permissions.refresh_all()
@@ -372,7 +373,7 @@ script.on_event(defines.events.on_gui_click, function(ev)
   end
   if not z then return end
   if action == "permissions" then zone_gui.editor(p,id,z,permissions.groups()); return end
-  if action == "show" then render(id); return end
+  if action == "show" then render(id,11 * 60); return end
   if action == "protect" then
     if z then
       z.protected = not z.protected
