@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--factorio-exe", type=Path, required=True)
 parser.add_argument("--source", type=Path)
 parser.add_argument("--work-dir", type=Path)
-parser.add_argument("--suite", choices=["protection", "building"], default="protection")
+parser.add_argument("--suite", choices=["protection", "building", "groups"], default="protection")
 args = parser.parse_args()
 repository = Path(__file__).resolve().parent.parent
 if args.source:
@@ -28,16 +28,22 @@ mods = test_root / "mods"
 mods.mkdir(exist_ok=True)
 (test_root / "saves").mkdir(exist_ok=True)
 package = mods / f"{root_name}.zip"
-driver_name = "zone-protection.lua" if args.suite == "protection" else "construction-refunds.lua"
+driver_name = {"protection":"zone-protection.lua", "building":"construction-refunds.lua", "groups":"group-permissions.lua"}[args.suite]
 driver = Path(__file__).with_name(driver_name).read_text(encoding="utf-8")
-with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
-    for path in sorted(source.rglob("*")):
-        if path.is_file():
-            content = path.read_bytes()
-            if path == source / "control.lua":
-                content += ("\n" + driver).encode("utf-8")
-            archive.writestr((Path(root_name) / path.relative_to(source)).as_posix(), content)
-    archive.writestr(f"{root_name}/scenarios/zone-protection-regression/control.lua", "-- Test driver runs in the mod.\n")
+def write_package(legacy=False):
+    with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(source.rglob("*")):
+            if path.is_file():
+                content = path.read_bytes()
+                if path == source / "control.lua":
+                    if legacy:
+                        content = Path(__file__).with_name("legacy-fixture.lua").read_bytes()
+                    else:
+                        content += ("\n" + driver).encode("utf-8")
+                archive.writestr((Path(root_name) / path.relative_to(source)).as_posix(), content)
+        archive.writestr(f"{root_name}/scenarios/zone-protection-regression/control.lua", "-- Test driver runs in the mod.\n")
+
+write_package()
 (mods / "mod-list.json").write_text(json.dumps({"mods": [
     {"name": "base", "enabled": True},
     {"name": "elevated-rails", "enabled": False},
@@ -63,7 +69,22 @@ if args.suite == "building":
     test_plan = (("building", ["--test-scenario", f'{metadata["name"]}/zone-protection-regression',
                               "--test-ticks", "3600", "--test-arg", "building"],
                   "building regression run completed"),)
+if args.suite == "groups":
+    test_plan = (
+        ("groups", ["--test-scenario", f'{metadata["name"]}/zone-protection-regression',
+                    "--test-ticks", "120", "--test-arg", "groups"], "group regression run completed"),
+        ("save", ["--create", str(save)], "group persistence fixture created"),
+        ("reload", ["--test-save", str(save), "--test-ticks", "120", "--test-arg", "reload-groups"],
+         "group restoration after reload"),
+        ("legacy-save", ["--create", str(save)], "legacy persistence fixture created"),
+        ("migration", ["--test-save", str(save), "--test-ticks", "120", "--test-arg", "migrate-groups"],
+         "same-version legacy migration"),
+    )
 for label, invocation, marker in test_plan:
+    if label == "legacy-save":
+        write_package(legacy=True)
+    elif label == "migration":
+        write_package()
     log_file = test_root / "factorio-current.log"
     log_offset = log_file.stat().st_size if log_file.exists() else 0
     result = subprocess.run(common + invocation, cwd=test_root,

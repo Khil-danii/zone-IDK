@@ -16,8 +16,22 @@ script.on_event(defines.events.on_robot_built_entity,function(ev)
     assert(not built.valid,"Robot building was not blocked")
     assert(cargo.get_item_count(item) == before + spent,"Robot refund lost quality or count")
     state.robot_events = state.robot_events + 1
+  elseif state.phase == "native-allowed" and ev.robot.surface == state.surface then
+    local built = ev.entity
+    robot_handler(ev)
+    assert(built.valid and built.quality.name == "rare","Allowed robot construction was rejected or downgraded")
+    assert(not built.destructible,"Allowed robot construction missed zone protection")
+    state.robot_events = state.robot_events + 1
   else
     robot_handler(ev)
+  end
+end)
+
+script.on_event(defines.events.on_robot_pre_mined,function(ev)
+  local state = storage.refund_tests
+  if state and ev.robot.surface == state.surface then
+    assert(state.phase == "native-mine","Robot mined while zone policy forbade it")
+    state.mine_events = (state.mine_events or 0) + 1
   end
 end)
 
@@ -57,6 +71,7 @@ local function zone(player, x1, x2)
   player.cursor_stack.set_stack{name="zone-selector",count=1}
   script.get_event_handler(defines.events.on_player_selected_area){
     player_index=player.index,area={left_top={x=x1,y=-6},right_bottom={x=x2,y=6}}}
+  return "zone_"..storage.zone_counter
 end
 
 local function fill_inventory(inventory)
@@ -173,7 +188,7 @@ script.on_event(defines.events.on_tick,function()
     for _,robot in pairs(robots) do
       local cargo=robot.get_inventory(defines.inventory.robot_cargo)
       if cargo and not cargo.is_empty() then
-        zone(player,11,21)
+        state.zone_id = zone(player,11,21)
         state.protected=true
         break
       end
@@ -185,11 +200,45 @@ script.on_event(defines.events.on_tick,function()
   for _,robot in pairs(robots) do
     total=total+robot.get_inventory(defines.inventory.robot_cargo).get_item_count(item)
   end
+  local built = state.surface.find_entities_filtered{name="assembling-machine-1"}
+  total = total + #built
   assert(total == 3,"Real robot construction lost or duplicated a rare item")
-  if state.robot_events >= 2 and #robots == 0 then
+  if state.phase == "native" and state.robot_events >= 2 and #robots == 0 then
     assert(state.protected,"Robot zone was never activated in flight")
     assert(#state.surface.find_entities_filtered{name="assembling-machine-1"} == 0,"Protected construction survived")
     log("ZONE TEST PASS: real robots keep all 3 rare items after zone activation in flight")
+    local z = storage.zones[state.zone_id]
+    z.robot_permissions.build = true
+    state.phase = "native-allowed"; state.robot_events = 0
+    for _,x in ipairs{14,18} do
+      state.surface.create_entity{name="entity-ghost",inner_name="assembling-machine-1",position={x,0},force=player.force,quality="rare"}
+    end
+  elseif state.phase == "native-allowed" and state.robot_events >= 2 and #robots == 0 then
+    assert(#built == 2,"Permitted robot construction failed")
+    log("ZONE TEST PASS: real robots build rare protected machines when allowed")
+    local z = storage.zones[state.zone_id]
+    z.robot_permissions.mine = true
+    z.permissions[0] = {mine=true} -- Human mining remains possible after robot permission is revoked.
+    protect(state.zone_id)
+    state.phase = "native-mine-flight"
+    for _,entity in ipairs(built) do entity.order_deconstruction(player.force) end
+  elseif state.phase == "native-mine-flight" and #robots > 0 then
+    local z = storage.zones[state.zone_id]
+    z.robot_permissions.mine = false
+    protect(state.zone_id)
+    assert(built[1].minable_flag,"Flight cancellation test accidentally relied on a global mining lock")
+    state.phase = "native-mine-cancelled"
+  elseif state.phase == "native-mine-cancelled" and #robots == 0 then
+    assert(#built == 2,"Robot ignored revoked demolition permission")
+    log("ZONE TEST PASS: robot demolition cancelled in flight while human mining stays allowed")
+    local z = storage.zones[state.zone_id]
+    z.robot_permissions.mine = true
+    protect(state.zone_id)
+    state.phase = "native-mine"
+    for _,entity in ipairs(built) do entity.order_deconstruction(player.force) end
+  elseif state.phase == "native-mine" and #robots == 0 and #built == 0 then
+    assert(state.mine_events == 2,"Native robot mining events were not exercised")
+    log("ZONE TEST PASS: permitted robot demolition returns both rare machines without item loss")
     log("ZONE TEST PASS: building regression run completed")
     script.finish_test(true)
   end

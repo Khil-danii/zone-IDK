@@ -4,6 +4,6 @@
   "title": "Zone Permissions",
   "author": "Chip(ARMA5)",
   "factorio_version": "2.1",
-  "description": "Adds zone-based permission system that overrides global group permissions in specific areas",
-  "dependencies": ["base >= 1.1.0"]
+  "description": "Adds zone restrictions for existing Factorio permission groups. Global group prohibitions remain in effect.",
+  "dependencies": ["base >= 2.1.0"]
 }
