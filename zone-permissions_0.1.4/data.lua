@@ -27,7 +27,7 @@ data:extend({
       type = "custom",
       border_color = { r = 0, g = 1, b = 0 },
       cursor_box_type = "copy",
-      mode = "blueprint"
+      mode = {"blueprint", "any-entity", "any-tile"}
     },
     
     -- Альтернативный режим (ПКМ)
@@ -35,7 +35,7 @@ data:extend({
       type = "custom",
       border_color = { r = 1, g = 0, b = 0 },
       cursor_box_type = "not-allowed",
-      mode = "cancel-deconstruct"
+      mode = {"cancel-deconstruct", "any-entity"}
     }
   },
   
