@@ -2,6 +2,10 @@
 Version: 0.1.5
 Date: 2026-11-06
   Bugfixes:
+    - Reject blueprint ghosts without attempting to refund an entity-ghost item.
+    - Refund actual consumed items, preserving their quality and item data.
+    - Return blocked robot construction items to the robot cargo inventory.
+    - Spill refund overflow on the ground instead of losing items.
     - Use minable_flag when changing mining permissions in Factorio 2.1.
     - Restore original entity properties when a zone is disabled or deleted.
     - Keep overlapping zones protected until their last protection is removed.

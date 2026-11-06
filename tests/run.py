@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--factorio-exe", type=Path, required=True)
 parser.add_argument("--source", type=Path)
 parser.add_argument("--work-dir", type=Path)
+parser.add_argument("--suite", choices=["protection", "building"], default="protection")
 args = parser.parse_args()
 repository = Path(__file__).resolve().parent.parent
 if args.source:
@@ -27,7 +28,8 @@ mods = test_root / "mods"
 mods.mkdir(exist_ok=True)
 (test_root / "saves").mkdir(exist_ok=True)
 package = mods / f"{root_name}.zip"
-driver = Path(__file__).with_name("zone-protection.lua").read_text(encoding="utf-8")
+driver_name = "zone-protection.lua" if args.suite == "protection" else "construction-refunds.lua"
+driver = Path(__file__).with_name(driver_name).read_text(encoding="utf-8")
 with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
     for path in sorted(source.rglob("*")):
         if path.is_file():
@@ -39,9 +41,9 @@ with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
 (mods / "mod-list.json").write_text(json.dumps({"mods": [
     {"name": "base", "enabled": True},
     {"name": "elevated-rails", "enabled": False},
-    {"name": "quality", "enabled": False},
+    {"name": "quality", "enabled": args.suite == "building"},
     {"name": "space-age", "enabled": False},
-    {"name": "recycler", "enabled": False},
+    {"name": "recycler", "enabled": args.suite == "building"},
     {"name": metadata["name"], "enabled": True},
 ]}), encoding="utf-8")
 data = args.factorio_exe.resolve().parents[2] / "data"
@@ -50,13 +52,18 @@ config.write_text(f"[path]\nread-data={data.as_posix()}\nwrite-data={test_root.a
 common = [str(args.factorio_exe.resolve()), "--config", str(config), "--mod-directory", str(mods),
           "--disable-audio", "--no-log-rotation"]
 save = test_root / "saves" / "zone-protection-regression.zip"
-for label, invocation, marker in (
+test_plan = (
     ("prepare", ["--test-scenario", f'{metadata["name"]}/zone-protection-regression',
                  "--test-ticks", "120", "--test-arg", "prepare"], "initial regression run completed"),
     ("save", ["--create", str(save)], "persistence fixture created"),
     ("reload", ["--test-save", str(save), "--test-ticks", "120", "--test-arg", "reload"],
      "restoration after reload"),
-):
+)
+if args.suite == "building":
+    test_plan = (("building", ["--test-scenario", f'{metadata["name"]}/zone-protection-regression',
+                              "--test-ticks", "3600", "--test-arg", "building"],
+                  "building regression run completed"),)
+for label, invocation, marker in test_plan:
     log_file = test_root / "factorio-current.log"
     log_offset = log_file.stat().st_size if log_file.exists() else 0
     result = subprocess.run(common + invocation, cwd=test_root,
@@ -75,4 +82,4 @@ for label, invocation, marker in (
             print(line)
     if label == "save" and not save.is_file():
         raise SystemExit(f"FAIL: native --create did not write {save}")
-print(f"PASS: zone protection regressions, including save/load. Logs: {test_root}")
+print(f"PASS: {args.suite} regressions. Logs: {test_root}")

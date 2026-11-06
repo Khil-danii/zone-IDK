@@ -122,6 +122,30 @@ script.on_event(defines.events.on_player_selected_area, function(ev)
   p.print("Зона создана и защищена: "..id,{r=0,g=1,b=0})
 end)
 
+local function refund_stack(stack, destination, surface, position)
+  if not stack or not stack.valid_for_read then return end
+  local remaining = stack.count
+  if destination and destination.valid then
+    remaining = remaining - destination.insert(stack)
+  end
+  if remaining > 0 then
+    -- Copy the real stack so quality and item data survive a partial refund.
+    -- Do not modify the event's stack, which other mods may also inspect.
+    local overflow = game.create_inventory(1)
+    overflow[1].set_stack(stack)
+    overflow[1].count = remaining
+    surface.spill_item_stack{
+      position = position,
+      stack = overflow[1],
+      enable_looted = true,
+      allow_belts = false,
+      use_start_position_on_failure = true,
+      drop_full_stack = true
+    }
+    overflow.destroy()
+  end
+end
+
 script.on_event({defines.events.on_built_entity, defines.events.on_robot_built_entity}, function(ev)
   local ent = ev.created_entity or ev.entity
   if not ent or not ent.valid then return end
@@ -130,18 +154,20 @@ script.on_event({defines.events.on_built_entity, defines.events.on_robot_built_e
     local player = ev.player_index and game.get_player(ev.player_index)
     if player then player.print("Нельзя строить в зоне: "..id,{r=1,g=0,b=0}) end
 
-    local count = 0
-    local name
-    if ent.prototype.items_to_place_this then
-      for _,it in pairs(ent.prototype.items_to_place_this) do
-        name = it.name; count = it.count; break
-      end
-    end
-    if not name then name = ent.name; count = 1 end
+    local surface, position = ent.surface, ent.position
+    local ghost = ent.type == "entity-ghost" or ent.type == "tile-ghost"
+    if not ent.destroy() then return end
+    -- A blueprint ghost consumes no construction item and must not create a refund.
+    if ghost then return end
 
-    ent.destroy()
-    if player and count > 0 then
-      player.insert{name=name, count=count}
+    if ev.consumed_items and ev.consumed_items.valid then
+      for index=1,#ev.consumed_items do
+        refund_stack(ev.consumed_items[index], player, surface, position)
+      end
+    elseif ev.stack and ev.stack.valid_for_read then
+      local robot = ev.robot
+      local cargo = robot and robot.valid and robot.get_inventory(defines.inventory.robot_cargo)
+      refund_stack(ev.stack, cargo, surface, position)
     end
     return true
   end
