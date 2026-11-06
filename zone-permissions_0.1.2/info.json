@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "title": "Zone Permissions",
   "author": "Chip(ARMA5)",
-  "factorio_version": "2.0",
+  "factorio_version": "2.1",
   "description": "Adds zone-based permission system that overrides global group permissions in specific areas",
   "dependencies": ["base >= 1.1.0"]
 }
